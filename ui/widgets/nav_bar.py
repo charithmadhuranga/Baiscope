@@ -38,10 +38,9 @@ class NavBar(QFrame):
 
     NAV_ITEMS = [
         ("🔍", "Search"),
-        ("🎌", "Anime"),
-        ("🎬", "Movies"),
-        ("📺", "Series"),
+        ("🌐", "Sites"),
         ("⭐", "Favorites"),
+        ("📁", "Catalogs"),
     ]
 
     def __init__(self, parent=None) -> None:
@@ -79,9 +78,9 @@ class NavBar(QFrame):
         )
 
         # Settings button at bottom
-        settings_btn = NavButton("⚙️", "Settings")
-        settings_btn.setCheckable(False)
-        layout.addWidget(settings_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.settings_btn = NavButton("⚙️", "Settings")
+        self.settings_btn.setCheckable(False)
+        layout.addWidget(self.settings_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(

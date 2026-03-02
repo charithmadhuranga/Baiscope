@@ -26,7 +26,7 @@ class BrowsePage(QWidget):
     def __init__(
         self,
         title: str,
-        scraper: BaseScraper,
+        scraper: BaseScraper | None,
         on_card_click,
         parent=None,
     ) -> None:
@@ -46,6 +46,21 @@ class BrowsePage(QWidget):
         self.setObjectName("BrowsePage")
         self._build_ui()
         self._apply_style()
+
+    def set_scraper(
+        self, scraper: BaseScraper, title: str = "", category: str = ""
+    ) -> None:
+        """Switch the page to a new scraper/site dynamically."""
+        self._scraper = scraper
+        if title:
+            self._title = title
+            # Update header label
+            for child in self.findChildren(QLabel, "PageHeader"):
+                child.setText(title)
+        self._loaded = False
+        self._clear_grid()
+        self._fetch_trending()
+
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -71,9 +86,7 @@ class BrowsePage(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setObjectName("ResultsScroll")
-        self.scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
         self.grid_container = QWidget()
@@ -130,9 +143,7 @@ class BrowsePage(QWidget):
             self.grid_layout.addWidget(card, idx // cols, idx % cols)
 
     def _calc_columns(self) -> int:
-        return max(
-            1, self.scroll.viewport().width() // (ClickableCard.CARD_WIDTH + 20)
-        )
+        return max(1, self.scroll.viewport().width() // (ClickableCard.CARD_WIDTH + 20))
 
     # ------------------------------------------------------------------ #
     #  Lazy load on first show                                             #
@@ -146,16 +157,16 @@ class BrowsePage(QWidget):
     def _fetch_trending(self, page: int = 1) -> None:
         if self._is_loading:
             return
-            
+
         self._is_loading = True
         self._current_page = page
-        
+
         if page == 1:
             self._clear_grid()
             self.status_label.setText("🔍 Loading popular titles…")
         else:
             self.status_label.setText(f"🔍 Loading page {page}…")
-            
+
         self.refresh_btn.setVisible(False)
 
         # Use a search query that tends to return popular content
@@ -177,7 +188,7 @@ class BrowsePage(QWidget):
 
     def _on_results(self, results: list[dict[str, str]]) -> None:
         self._is_loading = False
-        
+
         if not results and self._current_page == 1:
             self.status_label.setText(
                 "No content available. The site may be unreachable."
@@ -185,16 +196,18 @@ class BrowsePage(QWidget):
             self.refresh_btn.setVisible(True)
             return
         elif not results:
-            self.status_label.setText(f"{len(self._current_results)} titles loaded (No more content)")
+            self.status_label.setText(
+                f"{len(self._current_results)} titles loaded (No more content)"
+            )
             return
 
         is_new = self._current_page == 1
-        
+
         if is_new:
             self._current_results = results
         else:
             self._current_results.extend(results)
-            
+
         self.status_label.setText(f"{len(self._current_results)} titles")
         self.refresh_btn.setVisible(True)
         cols = self._calc_columns()
@@ -212,7 +225,7 @@ class BrowsePage(QWidget):
             cover = item.get("cover_url", "")
             if cover:
                 self._card_url_map[cover] = card
-                
+
             self.grid_layout.addWidget(card, idx // cols, idx % cols)
 
             if cover:
@@ -247,3 +260,12 @@ class BrowsePage(QWidget):
             px = QPixmap(path)
             if not px.isNull():
                 card.set_pixmap(px)
+
+    def set_adult_visible(self, visible: bool) -> None:
+        """Show or hide adult content."""
+        for card in self._cards:
+            card.setVisible(visible)
+        if not visible:
+            self.status_label.setText("Adult content hidden (enable in Settings)")
+        elif self._current_results:
+            self.status_label.setText(f"{len(self._current_results)} titles")

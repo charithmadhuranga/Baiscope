@@ -25,12 +25,14 @@ except (ImportError, OSError):
 
 try:
     from PySide6.QtWebEngineWidgets import QWebEngineView
+
     HAS_WEBENGINE = True
 except ImportError:
     HAS_WEBENGINE = False
 
 try:
     from PySide6.QtWebEngineWidgets import QWebEngineView
+
     HAS_WEBENGINE = True
 except ImportError:
     HAS_WEBENGINE = False
@@ -46,11 +48,12 @@ def _fmt_time(ms: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
-
 from PySide6.QtWebEngineCore import QWebEnginePage
+
 
 class LoggingPage(QWebEnginePage):
     """Custom WebEnginePage to intercept and print JS console logs."""
+
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         # Print all JS console messages to terminal for debugging
         print(f"js[{level}]: {message} (line {lineNumber} in {sourceID})")
@@ -115,8 +118,9 @@ class PlayerPage(QWidget):
 
         # Video surface
         from PySide6.QtWidgets import QStackedWidget
+
         self.video_stack = QStackedWidget()
-        
+
         self.video_frame = QFrame()
         self.video_frame.setObjectName("VideoFrame")
         self.video_frame.setMinimumSize(640, 360)
@@ -124,22 +128,25 @@ class PlayerPage(QWidget):
 
         if HAS_WEBENGINE:
             self.webview = QWebEngineView()
-            
+
             # Attach custom LoggingPage to print JS errors to terminal
             self.logging_page = LoggingPage(self.webview)
             self.webview.setPage(self.logging_page)
-            
+
             # Configure Profile to prevent ERR_BLOCKED_BY_CLIENT
             profile = self.webview.page().profile()
-            
+
             # Allow all cookies (essential for embedded JWPlayers)
             from PySide6.QtWebEngineCore import QWebEngineProfile
-            profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-            
+
+            profile.setPersistentCookiesPolicy(
+                QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
+            )
+
             # Disable generic Tracking Prevention if it exists (Qt 6.7+)
             if hasattr(profile, "setTrackingPreventionEnabled"):
                 profile.setTrackingPreventionEnabled(False)
-            
+
             self.webview.settings().setAttribute(
                 self.webview.settings().WebAttribute.PlaybackRequiresUserGesture, False
             )
@@ -151,7 +158,7 @@ class PlayerPage(QWidget):
         fallback_container = QWidget()
         fallback_layout = QVBoxLayout(fallback_container)
         fallback_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         self.fallback_label = QLabel(
             "Unable to play this stream.\n\n"
             "Please try using the external player option below."
@@ -159,7 +166,7 @@ class PlayerPage(QWidget):
         self.fallback_label.setObjectName("FallbackLabel")
         self.fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fallback_layout.addWidget(self.fallback_label)
-        
+
         # Open in Browser button
         self.open_browser_btn = QPushButton("🌐 Open in Browser")
         self.open_browser_btn.setObjectName("OpenBrowserBtn")
@@ -167,7 +174,7 @@ class PlayerPage(QWidget):
         self.open_browser_btn.clicked.connect(self._open_in_browser)
         self.open_browser_btn.setVisible(False)
         fallback_layout.addWidget(self.open_browser_btn)
-        
+
         fallback_container.setVisible(False)
         root.addWidget(fallback_container)
         self.fallback_container = fallback_container
@@ -317,56 +324,77 @@ class PlayerPage(QWidget):
 
         self._media_player.audio_set_volume(80)
 
-    def _try_webengine(self, url: str, headers: dict) -> bool:
-        """Try to play URL in WebEngine."""
+    def _try_webengine(self, url: str, headers: dict, is_embed: bool = False) -> bool:
+        """Try to play URL in WebEngine.
+
+        Args:
+            url: The URL to load
+            headers: HTTP headers to use
+            is_embed: If True, this is an embed URL that needs special handling
+        """
         if not HAS_WEBENGINE:
             return False
-        
+
         try:
             self.fallback_container.setVisible(False)
             self.video_stack.setVisible(True)
             self.video_stack.setCurrentWidget(self.webview)
             self.controls_widget.setVisible(False)
-            
-            # Clear cache
+
+            # Clear cache and cookies for fresh start
             self.webview.page().profile().clearHttpCache()
-            
+            self.webview.page().profile().clearAllVisitedLinks()
+
             # Configure settings
             settings = self.webview.settings()
             settings.setAttribute(settings.WebAttribute.JavascriptEnabled, True)
             settings.setAttribute(settings.WebAttribute.PluginsEnabled, True)
-            settings.setAttribute(settings.WebAttribute.JavascriptCanOpenWindows, True)
-            settings.setAttribute(settings.WebAttribute.AllowRunningInsecureContent, True)
-            settings.setAttribute(settings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-            settings.setAttribute(settings.WebAttribute.AllowWindowActivationFromJavaScript, True)
+            settings.setAttribute(settings.WebAttribute.JavascriptCanOpenWindows, False)
+            settings.setAttribute(
+                settings.WebAttribute.AllowRunningInsecureContent, True
+            )
+            settings.setAttribute(
+                settings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+            )
             settings.setAttribute(settings.WebAttribute.FullScreenSupportEnabled, True)
             settings.setAttribute(settings.WebAttribute.WebGLEnabled, True)
-            
+
             from PySide6.QtCore import QUrl
-            
-            # Try direct URL loading with proper headers
-            # Use data URL approach for better compatibility
-            html_content = f'''
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>Player</title>
-                <style>
-                    * {{ margin: 0; padding: 0; }}
-                    html, body {{ width: 100%; height: 100%; background: #000; }}
-                    iframe {{ width: 100%; height: 100%; border: none; }}
-                </style>
-            </head>
-            <body>
-                <iframe src="{url}" allowfullscreen></iframe>
-            </body>
-            </html>
-            '''
-            
-            self.webview.setHtml(html_content, baseUrl=QUrl("about:blank"))
+
+            if is_embed:
+                # For embed URLs, load directly in WebEngine
+                # These are iframe-based players that work best when loaded directly
+                self.webview.setUrl(QUrl(url))
+            else:
+                # For direct video URLs, use HTML with video tag
+                html_content = f'''
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <title>Player</title>
+                    <style>
+                        * {{ margin: 0; padding: 0; }}
+                        html, body {{ width: 100%; height: 100%; background: #000; overflow: hidden; }}
+                        video {{ width: 100%; height: 100%; }}
+                    </style>
+                </head>
+                <body>
+                    <video id="player" controls autoplay>
+                        <source src="{url}" type="application/x-mpegURL">
+                        <source src="{url}" type="video/mp4">
+                    </video>
+                    <script>
+                        var video = document.getElementById('player');
+                        video.play().catch(e => console.log('Auto-play blocked'));
+                    </script>
+                </body>
+                </html>
+                '''
+                self.webview.setHtml(html_content, baseUrl=QUrl("https://example.com/"))
+
             return True
-            
+
         except Exception as e:
             print(f"WebEngine failed: {e}")
             return False
@@ -375,13 +403,13 @@ class PlayerPage(QWidget):
         """Try to play URL with VLC."""
         if not HAS_VLC or not self._media_player:
             return False
-        
+
         try:
             self.fallback_container.setVisible(False)
             self.video_stack.setVisible(True)
             self.video_stack.setCurrentWidget(self.video_frame)
             self.controls_widget.setVisible(True)
-            
+
             # Prepare VLC options
             options = []
             if headers.get("Referer"):
@@ -397,12 +425,12 @@ class PlayerPage(QWidget):
             media = self._vlc_instance.media_new(url, *options)
             self._media_player.set_media(media)
             self._media_player.play()
-            
-            if hasattr(self, 'play_btn'):
+
+            if hasattr(self, "play_btn"):
                 self.play_btn.setText("⏸")
             self._timer.start()
             return True
-            
+
         except Exception as e:
             print(f"VLC failed: {e}")
             return False
@@ -411,9 +439,11 @@ class PlayerPage(QWidget):
         """Stream torrent using libtorrent."""
         try:
             from scrapers.torrent_streamer import TorrentStreamer
-            
-            self._show_fallback("Starting torrent stream...\n\nThis may take a moment to connect to peers...")
-            
+
+            self._show_fallback(
+                "Starting torrent stream...\n\nThis may take a moment to connect to peers..."
+            )
+
             # Start torrent in background thread
             def start_torrent():
                 streamer = TorrentStreamer()
@@ -424,41 +454,55 @@ class PlayerPage(QWidget):
                         if status.get("error"):
                             break
                         import time
+
                         time.sleep(2)
-                    
+
                     # Get the file path and play
                     stream_path = streamer.get_stream_url()
                     if stream_path:
                         # Play the file
                         from PySide6.QtCore import QMetaObject, Qt
+
                         QMetaObject.invokeMethod(
                             self,
                             lambda: self._play_with_vlc(stream_path, {}),
-                            Qt.QueuedConnection
+                            Qt.QueuedConnection,
                         )
                 streamer.stop()
-            
+
             import threading
+
             thread = threading.Thread(target=start_torrent, daemon=True)
             thread.start()
-            
+
         except ImportError:
-            self._show_fallback("Torrent streaming requires libtorrent.\n\nOpening in browser...")
+            self._show_fallback(
+                "Torrent streaming requires libtorrent.\n\nOpening in browser..."
+            )
             self._open_in_browser()
         except Exception as e:
-            self._show_fallback(f"Torrent error: {str(e)[:50]}...\n\nOpening in browser...")
+            self._show_fallback(
+                f"Torrent error: {str(e)[:50]}...\n\nOpening in browser..."
+            )
             self._open_in_browser()
 
     def play(self, source: str | dict, title: str = "") -> None:
-        """Play the given stream source (URL or metadata dict)."""
+        """Play the given stream source (URL or metadata dict).
+
+        Source can be:
+        - str: Direct URL or embed URL
+        - dict: {"url": str, "headers": dict, "type": "direct"|"embed"}
+        """
         self._stop()
 
         url = ""
         headers = {}
-        
+        stream_type = "embed"  # Default to embed for backwards compatibility
+
         if isinstance(source, dict):
             url = source.get("url", "")
             headers = source.get("headers", {})
+            stream_type = source.get("type", "embed")
         else:
             url = source
 
@@ -466,29 +510,61 @@ class PlayerPage(QWidget):
         self._current_url = url
         self.now_playing.setText(title or url)
 
-        # Handle Torrents - try streaming with libtorrent first
+        # Detect stream type from URL if not specified
+        if stream_type == "embed" and not url.startswith(("http://", "https://")):
+            url = "https://" + url
+
+        # Check for known embed domains to determine type
+        embed_domains = [
+            "vidsrc",
+            "stream",
+            "embed",
+            "dood",
+            "filemoon",
+            "streamtape",
+            "mixdrop",
+            "voe",
+        ]
+        if stream_type == "embed" and any(d in url.lower() for d in embed_domains):
+            stream_type = "embed"
+        elif stream_type == "embed" and url.endswith(
+            (".mp4", ".mkv", ".m3u8", ".webm")
+        ):
+            stream_type = "direct"
+
+        # Handle Torrents
         if url.endswith(".torrent") or url.startswith("magnet:"):
             self._stream_torrent(url)
             return
 
-        # Direct video files - play with VLC
-        video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m3u8']
+        # Handle embed URLs - use WebEngine
+        if stream_type == "embed" or "embed" in url.lower():
+            if self._try_webengine(url, headers, is_embed=True):
+                return
+            # Fallback: try WebEngine without embed flag
+            if self._try_webengine(url, headers, is_embed=False):
+                return
+
+        # Direct video files - try VLC first, then WebEngine
+        video_extensions = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m3u8"]
         if any(url.lower().endswith(ext) for ext in video_extensions):
-            self._play_with_vlc(url, headers)
+            if self._play_with_vlc(url, headers):
+                return
+            # Fallback to WebEngine
+            if self._try_webengine(url, headers, is_embed=False):
+                return
+
+        # Try WebEngine for other URLs
+        if self._try_webengine(url, headers, is_embed=(stream_type == "embed")):
             return
 
-        # Try WebEngine for embed URLs
-        if self._try_webengine(url, headers):
-            return
-        
-        # Try VLC for direct streams
+        # Try VLC as fallback
         if self._play_with_vlc(url, headers):
             return
-        
+
         # Last resort - open in browser
         self._show_fallback(
-            "Unable to play embedded.\n\n"
-            "Click below to open in browser."
+            "Unable to play this stream.\n\nClick below to open in browser."
         )
         self._open_in_browser()
 
@@ -509,6 +585,7 @@ class PlayerPage(QWidget):
             self._media_player.stop()
         if HAS_WEBENGINE and hasattr(self, "webview"):
             from PySide6.QtCore import QUrl
+
             self.webview.setUrl(QUrl("about:blank"))
         if hasattr(self, "play_btn"):
             self.play_btn.setText("▶")
@@ -548,6 +625,7 @@ class PlayerPage(QWidget):
         """Open current URL in system default browser."""
         if self._current_url:
             import webbrowser
+
             webbrowser.open(self._current_url)
 
     def _update_position(self) -> None:

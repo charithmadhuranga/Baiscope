@@ -1,10 +1,9 @@
-"""Drama scraper for Asian dramas using multiple sources."""
+"""Drama scraper for Asian dramas using multiple streaming sources."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -12,137 +11,122 @@ from scrapers.base import BaseScraper, ScraperError
 
 
 class DramaScraper(BaseScraper):
-    """Scraper for Asian dramas using vidsrc API."""
+    """Scraper for TV shows/series using streaming sources."""
 
-    BASE_URL = "https://dramacool.bg"
+    BASE_URL = "https://www.imdb.com"
     NAME = "Dramas"
     CATEGORY = "drama"
 
-    STREAM_DOMAINS = [
-        "vidsrc.cc",
-        "vidsrc.me",
+    STREAM_SOURCES = [
+        ("VidBinge", "https://www.vidbinge.to/embed/tv/"),
+        ("StreamSrc", "https://streamsrc.cc/embed/series/"),
+        ("SuperEmbed", "https://www.superembed.stream/embed/series/"),
+        ("2Embed", "https://www.2embed.online/embed/tv/"),
+        ("VikingEmbed", "https://vembed.stream/embed/tv/"),
+        ("Cinemull", "https://cinemull.cc/embed/tv/"),
+        ("AutoEmbed", "https://player.autoembed.cc/embed/tv/"),
     ]
 
     def search(self, query: str, page: int = 1) -> list[dict[str, str]]:
-        """Search for dramas using YTS-like approach with drama content."""
-        
+        """Search for TV shows using IMDB suggestion API."""
+
         results = []
-        
-        # Try using YTS with drama filter or just search movies
+
         try:
-            # Search on YTS for movies (same as movie scraper but filtered)
-            search_url = f"https://www.yts-official.top/browse-movies?keyword={query.replace(' ', '+')}&page={page}"
-            resp = self._get(search_url)
-            soup = BeautifulSoup(resp.text, "lxml")
-            
-            for wrap in soup.select(".browse-movie-wrap")[:20]:
-                title_tag = wrap.select_one(".browse-movie-title")
-                img_tag = wrap.select_one("img")
-                link = wrap.select_one("a.browse-movie-link")
-                
-                if title_tag:
-                    title = title_tag.text.strip()
-                    href = link.get("href", "") if link else ""
-                    cover = img_tag.get("src", "") if img_tag else ""
-                    
-                    # Extract IMDB from detail page link
-                    imdb_code = ""
-                    if "/movie/" in href:
-                        imdb_code = href.split("/movie/")[-1].rstrip("/")
-                    
-                    if href:
-                        results.append({
+            url = f"https://v2.sg.media-imdb.com/suggestion/{query[0].lower()}/{query.replace(' ', '%20')}.json"
+            resp = self._get(url)
+            data = resp.json()
+
+            for item in data.get("d", [])[:15]:
+                imdb_id = item.get("id", "")
+                if not imdb_id.startswith("tt"):
+                    continue
+
+                qid = item.get("qid", "")
+                if qid != "tvSeries" and qid != "tvMiniSeries":
+                    continue
+
+                title = item.get("l", "")
+                cover = item.get("i", {}).get("imageUrl", "")
+
+                if title and imdb_id:
+                    results.append(
+                        {
                             "title": title,
-                            "cover_url": f"https://www.yts-official.top{cover}" if cover.startswith("/") else cover,
-                            "detail_url": f"https://www.yts-official.top{href}" if href.startswith("/") else href,
-                            "imdb_code": imdb_code,
-                            "is_drama": "drama" in title.lower() or "korean" in title.lower() or "k-drama" in title.lower(),
-                        })
+                            "cover_url": cover,
+                            "detail_url": f"series/{imdb_id}",
+                            "imdb_code": imdb_id,
+                        }
+                    )
         except Exception:
             pass
-        
+
         return results
 
     def get_detail(self, detail_url: str) -> dict[str, Any]:
-        """Get drama detail and generate streaming URLs."""
-        try:
-            resp = self._get(detail_url)
-        except ScraperError:
-            return {"title": "", "synopsis": "", "episodes": []}
+        """Get series detail and generate streaming URLs."""
 
-        soup = BeautifulSoup(resp.text, "lxml")
+        imdb_code = detail_url.replace("series/", "")
+        if not imdb_code.startswith("tt"):
+            imdb_code = "tt" + imdb_code
 
-        # Get title
         title = ""
-        title_tag = soup.select_one("h1[itemprop='name']") or soup.select_one("div.hidden-xs h1")
-        if title_tag:
-            title = title_tag.text.strip()
-            year_tag = soup.select_one("div.hidden-xs h2")
-            if year_tag:
-                title += f" ({year_tag.text.strip()})"
-
-        # Get cover
         cover_url = ""
-        img = soup.select_one("img[itemprop='image']")
-        if img:
-            cover_url = img.get("src", "")
-            if cover_url.startswith("/"):
-                cover_url = "https://www.yts-official.top" + cover_url
 
-        # Get synopsis
-        synopsis = ""
-        syn_div = soup.select_one("#synopsis")
-        if syn_div:
-            p = syn_div.select_one("p")
-            if p:
-                synopsis = p.text.strip()
+        try:
+            details_url = f"https://v2.sg.media-imdb.com/suggestion/{imdb_code[0].lower()}/{imdb_code}.json"
+            resp = self._get(details_url)
+            data = resp.json()
 
-        # Get IMDB code
-        imdb_code = ""
-        for link in soup.select("a[href*='imdb.com/title/tt']"):
-            href = link.get("href", "")
-            if "title/tt" in href:
-                imdb_code = href.split("title/")[-1].strip("/")
-                break
-        
-        if not imdb_code:
-            match = re.search(r'/movie/([a-z0-9-]+)', detail_url)
-            if match:
-                imdb_code = match.group(1)
+            for item in data.get("d", []):
+                if item.get("id") == imdb_code:
+                    title = item.get("l", "")
+                    cover = item.get("i", {}).get("imageUrl", "")
+                    if cover:
+                        cover_url = cover.replace("._SX200_", "._SX500_")
+                    break
+        except Exception:
+            pass
+
+        if not title:
+            title = f"Series {imdb_code}"
 
         episodes = []
-        
-        # Generate streaming URLs for dramas
-        if imdb_code:
-            if not imdb_code.startswith("tt"):
-                imdb_code = "tt" + imdb_code
-            
-            # Add streaming options for Season 1 (most dramas)
-            for domain in self.STREAM_DOMAINS:
-                for season in range(1, 3):  # Try first 2 seasons
-                    episodes.append({
-                        "title": f"Watch Season {season} ({domain})",
-                        "url": f"https://{domain}/v3/embed/tv/{imdb_code}/{season}",
-                    })
+
+        for name, base_url in self.STREAM_SOURCES:
+            embed_url = f"{base_url}{imdb_code}"
+            episodes.append(
+                {
+                    "title": f"Watch ({name})",
+                    "url": embed_url,
+                }
+            )
 
         return {
             "title": title,
             "cover_url": cover_url,
-            "synopsis": synopsis,
+            "synopsis": "",
             "episodes": episodes,
+            "imdb_code": imdb_code,
         }
 
     def get_stream_url(self, episode_url: str) -> dict[str, Any] | None:
         """Return the streaming URL with proper headers."""
-        
-        for domain in self.STREAM_DOMAINS:
-            if domain in episode_url:
+
+        for name, base_url in self.STREAM_SOURCES:
+            if base_url.replace("https://", "").replace("www.", "").replace(
+                "embed/", ""
+            ).replace("series/", "") in episode_url.replace("https://", "").replace(
+                "www.", ""
+            ).replace("embed/", "").replace("series/", ""):
                 return {
                     "url": episode_url,
-                    "headers": {"Referer": f"https://{domain}/"}
+                    "headers": {"Referer": base_url},
+                    "type": "embed",
                 }
-        
+
         return {
             "url": episode_url,
-            "headers": {"Referer": "https://vidsrc.cc/"}
+            "headers": {"Referer": "https://vidsrc.cc/"},
+            "type": "embed",
         }

@@ -46,6 +46,7 @@ class DetailPage(QWidget):
         self._current_detail_url: str = ""
         self._current_cover_url: str = ""
         self._current_title: str = ""
+        self._current_source_site: str = ""
         self._build_ui()
         self._apply_style()
 
@@ -199,12 +200,13 @@ class DetailPage(QWidget):
     # ------------------------------------------------------------------ #
     #  Public — load a media item                                          #
     # ------------------------------------------------------------------ #
-    def load(self, scraper: BaseScraper, detail_url: str) -> None:
+    def load(self, scraper: BaseScraper, detail_url: str, source_site: str = "") -> None:
         """Fetch details for the given URL using the specified scraper."""
         self._current_scraper = scraper
         self._current_detail_url = detail_url
         self._current_cover_url = ""
         self._current_title = ""
+        self._current_source_site = source_site
         self.title_label.setText("Loading…")
         self.synopsis_label.setText("")
         self.meta_label.setText("")
@@ -225,6 +227,12 @@ class DetailPage(QWidget):
         self.synopsis_label.setText(detail.get("synopsis", ""))
 
         meta_parts = []
+        if self._current_source_site:
+            meta_parts.append(f"📡 {self._current_source_site}")
+        if self._current_scraper:
+            cat = getattr(self._current_scraper, 'CATEGORY', '')
+            if cat:
+                meta_parts.append(f"[{cat.upper()}]")
         if detail.get("year"):
             meta_parts.append(str(detail["year"]))
         if detail.get("rating"):
@@ -282,9 +290,7 @@ class DetailPage(QWidget):
     # ------------------------------------------------------------------ #
     def _is_favorited(self) -> bool:
         items = FavoritesPage._load_favorites()
-        return any(
-            f.get("detail_url") == self._current_detail_url for f in items
-        )
+        return any(f.get("detail_url") == self._current_detail_url for f in items)
 
     def _update_fav_button(self) -> None:
         if self._is_favorited():
@@ -332,3 +338,17 @@ class DetailPage(QWidget):
                 }
             )
         self._update_fav_button()
+
+    def get_current_media(self) -> dict:
+        """Return current media info for catalog."""
+        return {
+            "title": self._current_title,
+            "cover_url": self._current_cover_url,
+            "detail_url": self._current_detail_url,
+            "source": self._current_scraper.NAME if self._current_scraper else "",
+            "source_name": self._current_scraper.NAME if self._current_scraper else "",
+            "media_type": self._current_scraper.CATEGORY
+            if self._current_scraper
+            else "",
+            "source_site": self._current_source_site,
+        }
